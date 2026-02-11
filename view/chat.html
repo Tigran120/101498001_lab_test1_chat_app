@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat - Chat App</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f2f5; min-height: 100vh; }
+    .chat-header { background: #0d6efd; color: #fff; }
+    .messages { height: 360px; overflow-y: auto; background: #fff; border: 1px solid #dee2e6; }
+    .msg { padding: 6px 10px; border-bottom: 1px solid #eee; }
+    .msg.me { background: #e7f1ff; }
+    .typing-indicator { font-style: italic; color: #6c757d; padding: 4px 10px; font-size: 0.9em; }
+    .room-list .list-group-item { cursor: pointer; }
+    .room-list .list-group-item.active { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <nav class="navbar chat-header navbar-expand">
+    <div class="container-fluid">
+      <span class="navbar-brand mb-0">Chat App</span>
+      <span class="navbar-text me-3" id="currentUser"></span>
+      <button class="btn btn-outline-light btn-sm" id="btnLogout">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container-fluid py-3">
+    <div class="row">
+      <div class="col-md-3">
+        <div class="card">
+          <div class="card-header">Rooms</div>
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush room-list" id="roomList"></div>
+            <div class="p-2">
+              <button class="btn btn-outline-secondary btn-sm w-100" id="btnLeaveRoom" disabled>Leave room</button>
+            </div>
+          </div>
+        </div>
+        <div class="card mt-2">
+          <div class="card-header">Private chat</div>
+          <div class="card-body">
+            <label class="form-label small">Send to user</label>
+            <input type="text" class="form-control form-control-sm mb-2" id="privateToUser" placeholder="Username">
+            <div id="privateTyping" class="typing-indicator" style="display:none;"></div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control" id="privateMessage" placeholder="Private message">
+              <button class="btn btn-primary" id="btnSendPrivate">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-9">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span id="roomTitle">Select a room to start</span>
+          </div>
+          <div class="messages card-body p-0" id="messageArea">
+            <div class="p-3 text-muted text-center" id="noRoomHint">Join a room from the list to chat.</div>
+            <div id="messageList"></div>
+            <div id="typingArea" class="typing-indicator" style="display:none;"></div>
+          </div>
+          <div class="card-footer" id="roomInputArea" style="display:none;">
+            <div class="input-group">
+              <input type="text" class="form-control" id="messageInput" placeholder="Type a message...">
+              <button class="btn btn-primary" id="btnSend">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    (function () {
+      var session = localStorage.getItem('chat_session');
+      if (!session) {
+        window.location.href = 'login.html';
+        return;
+      }
+      var user;
+      try {
+        user = JSON.parse(session);
+        if (!user || !user.username) {
+          window.location.href = 'login.html';
+          return;
+        }
+      } catch (e) {
+        window.location.href = 'login.html';
+        return;
+      }
+
+      $('#currentUser').text(user.username);
+      var currentRoom = null;
+      var socket = null;
+      var rooms = [];
+
+      function connectSocket() {
+        socket = io({ auth: { username: user.username } });
+        socket.on('room_joined', function (data) {
+          currentRoom = data.room;
+          $('#roomTitle').text('Room: ' + currentRoom);
+          $('#noRoomHint').hide();
+          $('#messageList').empty();
+          $('#roomInputArea').show();
+          $('#btnLeaveRoom').prop('disabled', false);
+          renderRoomList();
+        });
+        socket.on('room_left', function () {
+          currentRoom = null;
+          $('#roomTitle').text('Select a room to start');
+          $('#noRoomHint').show();
+          $('#messageList').empty();
+          $('#roomInputArea').hide();
+          $('#btnLeaveRoom').prop('disabled', true);
+          $('#typingArea').hide();
+          renderRoomList();
+        });
+        socket.on('room_history', function (msgs) {
+          $('#messageList').empty();
+          (msgs || []).forEach(function (m) {
+            appendGroupMessage(m);
+          });
+        });
+        socket.on('new_group_message', function (m) {
+          appendGroupMessage(m);
+        });
+        socket.on('new_private_message', function (m) {
+          appendPrivateMessage(m);
+        });
+        socket.on('user_joined', function (d) {
+          appendSystemMessage(d.username + ' joined the room.');
+        });
+        socket.on('user_left', function (d) {
+          appendSystemMessage(d.username + ' left the room.');
+        });
+        socket.on('typing', function (d) {
+          if (d.to_user !== undefined) {
+            if (d.typing) {
+              $('#privateTyping').text(d.username + ' is typing...').show();
+            } else {
+              $('#privateTyping').hide();
+            }
+          } else {
+            if (d.typing) {
+              $('#typingArea').text(d.username + ' is typing...').show();
+            } else {
+              $('#typingArea').hide();
+            }
+          }
+        });
+        socket.on('error', function (d) {
+          alert(d.message || 'Error');
+        });
+      }
+
+      function appendGroupMessage(m) {
+        var isMe = m.from_user === user.username;
+        var html = '<div class="msg ' + (isMe ? 'me' : '') + '"><strong>' + escapeHtml(m.from_user) + '</strong> ' + escapeHtml(m.message) + ' <span class="small text-muted">' + escapeHtml(m.date_sent || '') + '</span></div>';
+        $('#messageList').append(html);
+        $('#messageArea').scrollTop($('#messageArea')[0].scrollHeight);
+      }
+
+      function appendPrivateMessage(m) {
+        var isMe = m.from_user === user.username;
+        var other = isMe ? m.to_user : m.from_user;
+        var html = '<div class="msg ' + (isMe ? 'me' : '') + '"><strong>DM ' + escapeHtml(other) + ':</strong> ' + escapeHtml(m.message) + ' <span class="small text-muted">' + escapeHtml(m.date_sent || '') + '</span></div>';
+        $('#messageList').append(html);
+        $('#messageArea').scrollTop($('#messageArea')[0].scrollHeight);
+      }
+
+      function appendSystemMessage(text) {
+        $('#messageList').append('<div class="msg text-muted small">' + escapeHtml(text) + '</div>');
+        $('#messageArea').scrollTop($('#messageArea')[0].scrollHeight);
+      }
+
+      function escapeHtml(s) {
+        if (!s) return '';
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function renderRoomList() {
+        var html = '';
+        rooms.forEach(function (r) {
+          var active = r === currentRoom ? ' active' : '';
+          html += '<a href="#" class="list-group-item list-group-item-action' + active + '" data-room="' + escapeHtml(r) + '">' + escapeHtml(r) + '</a>';
+        });
+        $('#roomList').html(html || '<div class="list-group-item text-muted">No rooms</div>');
+      }
+
+      function loadRooms() {
+        fetch('/api/rooms').then(function (r) { return r.json(); }).then(function (d) {
+          rooms = d.rooms || [];
+          renderRoomList();
+        });
+      }
+
+      $('#roomList').on('click', 'a[data-room]', function (e) {
+        e.preventDefault();
+        var room = $(this).data('room');
+        if (socket) socket.emit('join_room', room);
+      });
+
+      $('#btnLeaveRoom').on('click', function () {
+        if (socket) socket.emit('leave_room');
+      });
+
+      var typingTimeout;
+      $('#messageInput').on('input', function () {
+        if (!socket || !currentRoom) return;
+        socket.emit('typing_start', {});
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(function () {
+          socket.emit('typing_stop', {});
+        }, 800);
+      });
+
+      $('#privateMessage').on('input', function () {
+        var toUser = $('#privateToUser').val().trim();
+        if (!socket || !toUser) return;
+        socket.emit('typing_start', { to_user: toUser });
+        clearTimeout(window.privateTypingTimeout);
+        window.privateTypingTimeout = setTimeout(function () {
+          socket.emit('typing_stop', { to_user: toUser });
+        }, 800);
+      });
+
+      $('#btnSend').on('click', function () {
+        var text = $('#messageInput').val().trim();
+        if (!text || !socket || !currentRoom) return;
+        socket.emit('group_message', text);
+        $('#messageInput').val('');
+        if (socket) socket.emit('typing_stop', {});
+      });
+      $('#messageInput').on('keypress', function (e) {
+        if (e.which === 13) $('#btnSend').click();
+      });
+
+      $('#btnSendPrivate').on('click', function () {
+        var toUser = $('#privateToUser').val().trim();
+        var text = $('#privateMessage').val().trim();
+        if (!toUser || !text || !socket) return;
+        socket.emit('private_message', { to_user: toUser, message: text });
+        $('#privateMessage').val('');
+        socket.emit('typing_stop', { to_user: toUser });
+      });
+      $('#privateMessage').on('keypress', function (e) {
+        if (e.which === 13) $('#btnSendPrivate').click();
+      });
+
+      $('#btnLogout').on('click', function () {
+        localStorage.removeItem('chat_session');
+        window.location.href = 'login.html';
+      });
+
+      loadRooms();
+      connectSocket();
+    })();
+  </script>
+</body>
+</html>
