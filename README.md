@@ -30,24 +30,4 @@ Backend: Express, Socket.io, Mongoose.
 Frontend: HTML5, CSS, Bootstrap, fetch, jQuery.  
 Database: MongoDB (User, GroupMessage, PrivateMessage).
 
----
 
-## How to submit (D2L)
-
-1. **GitHub**
-   - Create a repo named: **studentID_lab_test1_chat_app** (replace `studentID` with your actual student ID).
-   - Push all your code there. Commit regularly so your history shows your work.
-
-2. **ZIP**
-   - Zip your project folder (only source code, no `node_modules`).
-   - Upload this ZIP to D2L by the deadline (11 Feb 2026, 8:00 PM).
-
-3. **In your D2L submission**
-   - Paste the **GitHub repository link** in the submission text or wherever your instructor asked for it.
-   - Add **evidence that the app works**: either a few screenshots (signup, login, chat in a room, typing indicator, etc.) or a short video. Upload the screenshots or video to D2L with the same submission.
-
-4. **Important**
-   - Submissions by email are not accepted.
-   - Only submit via D2L (ZIP + GitHub link + screenshots or video).
-
-Good luck.
