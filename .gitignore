@@ -1,0 +1,4 @@
+node_modules/
+.env
+*.log
+LabTest_COMP3133/
